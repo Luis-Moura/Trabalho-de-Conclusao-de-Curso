@@ -112,9 +112,7 @@ O script `stress-test-k6.js` na raiz do repositório executa uma rampa progressi
 **2. A partir da raiz do repositório, rode o k6 via Docker:**
 
 ```bash
-docker run --rm -i \
-  -v "$(pwd)/stress-test-k6.js:/stress-test-k6.js" \
-  grafana/k6 run /stress-test-k6.js
+docker run --rm -i grafana/k6 run - <stress-test-k6.js
 ```
 
 > **Por que `172.17.0.1`?**  

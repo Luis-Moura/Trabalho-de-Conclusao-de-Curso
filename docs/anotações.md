@@ -60,23 +60,74 @@ A diferença fundamental de geração de `short_code` foi mantida, pois é parte
 
 ### Resultados Rust
 
-- p(50): 
-- p(95): 
-- p(99): 
-- vus_max: 
-- dropped_iterations: 
-- http_req_failed: 
-- checks_total: 
+- p(50): 281.89µs - 265.25µs
+- p(95): 527.9µs - 494.45µs
+- p(99): 1.04ms - 624.2µs
+- vus_max: 500
+- dropped_iterations: 0
+- http_req_failed: 0
+- checks_total: 1261797 - 1261798
 
-### Resultados Java
+### Resultados Java 2x
 
-- p(50): 
-- p(95): 
-- p(99): 
-- vus_max: 
-- dropped_iterations: 
-- http_req_failed: 
-- checks_total: 
+- p(50): 339.14µs - 308.39µs
+- p(95): 8.79ms - 654.81µs
+- p(99): 112.27ms - 95.49ms
+- vus_max: 569 - 554
+- dropped_iterations: 83 - 58
+- http_req_failed: 0
+- checks_total: 1261682
+
+---
+
+## Observação: Não-Determinismo nos Resultados
+
+Uma observação crítica ao longo dos testes: **os resultados variam significativamente entre execuções da mesma imagem Docker, sem nenhuma alteração de código ou configuração.** Isso é especialmente pronunciado no Java.
+
+Exemplo concreto nos resultados da V2 (Java, 2 execuções):
+- p(95): **8.79ms** vs **654.81µs** → diferença de ~13x
+- p(99): **112.27ms** vs **95.49ms**
+- dropped_iterations: **83** vs **58**
+
+O Rust, por contraste, apresentou variação muito menor entre execuções (p95: 527.9µs vs 494.45µs).
+
+### Por que isso acontece no Java?
+
+**1. JVM JIT Compilation (principal causa)**
+
+A JVM não executa bytecode diretamente — ela usa compilação em camadas (tiered compilation):
+- **Nível 0**: Interpretação pura (lenta)
+- **Nível 1-3**: Compilador C1 (rápido, pouca otimização)
+- **Nível 4**: Compilador C2 (lento de compilar, muito otimizado)
+
+Quando o k6 começa a injetar carga, a JVM ainda está coletando dados de profiling. Durante esse "aquecimento", os mesmos métodos têm latências diferentes. Se o teste começa antes do JIT atingir o nível 4 em caminhos críticos (handler HTTP, serialização JSON, pool HikariCP), os percentis altos explodem. O timing exato em que o C2 assume varia por execução.
+
+**2. Garbage Collector (GC)**
+
+Java gerencia memória via GC. Pausas de GC (mesmo com G1GC ou ZGC) são imprevisíveis em timing — dependem da pressão de memória no momento exato do teste. Uma execução pode completar sem pause-the-world; outra pode sofrer um GC completo justo no meio da carga, causando spike nos percentis altos.
+
+**3. SecureRandom lock contention**
+
+Já documentado na V1: `SecureRandom` usa lock interno. A quantidade exata de contenção varia por scheduling de threads do OS em cada execução. Em condições de alta carga (1.500 req/s), pequenas diferenças no scheduling produzem grandes diferenças em filas de lock.
+
+**4. HikariCP connection pool warm-up**
+
+O pool de conexões do HikariCP inicializa as conexões de forma lazy e ajusta seu tamanho dinamicamente. A primeira execução pode criar conexões sob carga, adicionando latência irregular.
+
+**5. Estado do PostgreSQL**
+
+O buffer pool do Postgres (shared_buffers) fica mais quente a cada execução. A primeira execução pode ter mais cache misses no banco; a segunda aproveita dados já em memória.
+
+### Por que o Rust é mais estável?
+
+- **Sem JIT**: código nativo gerado em tempo de compilação — comportamento é o mesmo da primeira à última requisição
+- **Sem GC**: memória gerenciada via ownership, sem pausas imprevisíveis
+- **Sem lock no RNG**: `thread_rng()` usa Thread-Local Storage, sem contenção
+- **Comportamento determinístico desde a primeira requisição**
+
+### Implicação para o TCC
+
+Resultados de benchmark Java (e JVM em geral) requerem **descarte das primeiras execuções** (warm-up) e **múltiplas execuções** para calcular médias confiáveis. Comparar uma execução Java "fria" com Rust que é sempre "quente" é uma fonte de viés. Para resultados justos, o ideal seria rodar o k6 com uma fase de warm-up separada antes do período de medição real.
 
 ---
 
