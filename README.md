@@ -3,7 +3,7 @@
 > **Trabalho de Conclusão de Curso**  
 > Luis Henrique de Moura Santos  
 > Curso de Análise e Desenvolvimento de Sistemas — IFPI Campus Picos  
-> Orientador: Prof. Esp. Jorge Luis Lima
+> Orientador: 
 
 ---
 
