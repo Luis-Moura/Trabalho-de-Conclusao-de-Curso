@@ -18,9 +18,10 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("APP_PORT must be a valid port number");
 
-    // Pool com o mesmo limite do HikariCP na aplicação Java (max 10 conexões).
+    // Pool equivalente ao HikariCP: max 10 conexões, 5 pré-aquecidas (igual ao minimum-idle).
     let pool = PgPoolOptions::new()
         .max_connections(10)
+        .min_connections(5)
         .connect(&database_url)
         .await
         .expect("Failed to connect to PostgreSQL");
