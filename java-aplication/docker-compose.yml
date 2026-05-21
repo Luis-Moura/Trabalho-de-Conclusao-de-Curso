@@ -14,6 +14,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    command: "postgres -c autovacuum_vacuum_scale_factor=0.5 -c autovacuum_analyze_scale_factor=0.5 -c checkpoint_timeout=30min -c checkpoint_completion_target=0.9"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     restart: unless-stopped
 
   app:
@@ -25,6 +34,10 @@ services:
       DB_USERNAME: urluser
       DB_PASSWORD: urlpass
       APP_BASE_URL: http://localhost:8080
+      # V4b: ZGC Generacional — isola GC como variavel
+      # Para V4a (G1GC), substituir pela linha abaixo:
+      # JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=25.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=25.0 -XX:+UseZGC -XX:+ZGenerational"
     depends_on:
       db:
         condition: service_healthy
