@@ -42,6 +42,7 @@ async fn main() -> std::io::Result<()> {
             .route("/shorten",  web::post().to(handlers::post_shorten))
             .route("/{code}",   web::get().to(handlers::get_redirect))
     })
+    .workers(1)
     .bind(("0.0.0.0", port))?
     .run()
     .await
