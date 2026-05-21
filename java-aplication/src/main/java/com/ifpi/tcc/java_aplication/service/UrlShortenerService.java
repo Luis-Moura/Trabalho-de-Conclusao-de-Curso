@@ -5,8 +5,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
-import java.security.SecureRandom;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class UrlShortenerService {
@@ -15,7 +15,6 @@ public class UrlShortenerService {
     private static final int CODE_LENGTH = 7;
     private static final int MAX_RETRIES = 3;
 
-    private final SecureRandom random = new SecureRandom();
     private final UrlRepository repository;
     private final String baseUrl;
 
@@ -43,16 +42,11 @@ public class UrlShortenerService {
     }
 
     private String generateCode() {
-        byte[] bytes = new byte[CODE_LENGTH];
-
-        random.nextBytes(bytes);
-
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
         StringBuilder sb = new StringBuilder(CODE_LENGTH);
-
-        for (byte b : bytes) {
-            sb.append(BASE62.charAt(Math.abs(b % BASE62.length())));
+        for (int i = 0; i < CODE_LENGTH; i++) {
+            sb.append(BASE62.charAt(rng.nextInt(BASE62.length())));
         }
-
         return sb.toString();
     }
 }
