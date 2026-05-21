@@ -8,16 +8,16 @@ export const options = {
     // Permite JVM compilar caminhos críticos (JIT C1→C2) antes da medição.
     warmup: {
       executor: "constant-arrival-rate",
-      duration: "60s",
-      rate: 100,
+      duration: "120s",
+      rate: 300,
       timeUnit: "1s",
-      preAllocatedVUs: 100,
+      preAllocatedVUs: 150,
       tags: { phase: "warmup" },
     },
     // Fase medida: começa após o warm-up.
     test: {
       executor: "ramping-arrival-rate",
-      startTime: "60s",
+      startTime: "120s",
       startRate: 10,
       timeUnit: "1s",
       preAllocatedVUs: 500,
