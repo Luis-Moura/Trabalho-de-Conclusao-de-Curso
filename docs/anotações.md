@@ -131,3 +131,57 @@ Resultados de benchmark Java (e JVM em geral) requerem **descarte das primeiras 
 
 ---
 
+## Terceira Versão
+
+Objetivo: eliminar as três fontes de viés identificadas na observação acima — RNG assimétrico, ausência de warm-up medido da JVM e pool de conexões assimétrico.
+
+### Correções aplicadas
+
+**1. Java: `SecureRandom` → `ThreadLocalRandom`**
+
+`SecureRandom` foi substituído por `ThreadLocalRandom.current()` no `UrlShortenerService.generateCode()`. `ThreadLocalRandom` é o equivalente Java exato de `thread_rng()` do Rust: gerador por-thread (Thread-Local Storage), sem lock, sem contenção sob carga. Não é criptograficamente seguro — igual ao comportamento do Rust. Elimina a assimetria de contenção que inflava artificialmente a latência Java.
+
+**2. k6: fase de warm-up não medida (60s)**
+
+O script k6 ganhou um cenário `warmup` separado (60s a 100 req/s) que roda antes do cenário `test`. As métricas são separadas por tag `{ phase: "warmup" }` vs `{ phase: "test" }`, e os thresholds só se aplicam à fase `test`. Isso garante que a JVM já passou pelo ciclo C1→C2 de compilação JIT antes de qualquer medição começar, eliminando o spike de latência das primeiras execuções.
+
+**3. Rust: `min_connections(5)` no pool sqlx**
+
+Adicionado `.min_connections(5)` ao `PgPoolOptions` no `main.rs`, igualando o comportamento do HikariCP com `minimum-idle=5` do Java. Ambos os pools agora pré-aquecem 5 conexões ao banco na inicialização, eliminando o overhead de criação de conexão sob carga inicial.
+
+### O que permanece diferente (intencional)
+
+- **Runtime**: Rust compila para binário nativo; Java roda na JVM. Essa diferença é a essência do estudo.
+- **Framework HTTP**: Actix-web (async/Tokio) vs Spring Boot (Tomcat/threads). Também intencional.
+- **Modelo de memória**: ownership/zero GC no Rust vs GC no Java. Intencional.
+
+### Mudanças nos arquivos
+
+| Arquivo | Mudança |
+|---------|---------|
+| `java-aplication/src/main/java/.../service/UrlShortenerService.java` | `SecureRandom` removido; `generateCode()` usa `ThreadLocalRandom.current()` |
+| `stress-test-k6.js` | Cenário `warmup` adicionado; cenário `test` com `startTime: "60s"`; thresholds filtradas por `phase:test` |
+| `rust-aplication/src/main.rs` | `.min_connections(5)` adicionado ao `PgPoolOptions` |
+
+### Resultados Rust
+
+- p(50): 271.62µs
+- p(95): 513.2µs
+- p(99): 21.26ms
+- vus_max: 631
+- dropped_iterations: 0 
+- http_req_failed: 0
+- checks_total: 1273310
+
+### Resultados Java
+
+- p(50): 346.98µs
+- p(95): 589.23ms
+- p(99): 988.44ms
+- vus_max: 3007
+- dropped_iterations: 3358
+- http_req_failed: 0
+- checks_total: 1267084
+
+---
+
