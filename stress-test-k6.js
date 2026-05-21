@@ -4,8 +4,20 @@ import { randomString } from "https://jslib.k6.io/k6-utils/1.2.0/index.js";
 
 export const options = {
   scenarios: {
-    escalabilidade: {
+    // Fase de warm-up: 60s a 100 req/s — não entra nos thresholds.
+    // Permite JVM compilar caminhos críticos (JIT C1→C2) antes da medição.
+    warmup: {
+      executor: "constant-arrival-rate",
+      duration: "60s",
+      rate: 100,
+      timeUnit: "1s",
+      preAllocatedVUs: 100,
+      tags: { phase: "warmup" },
+    },
+    // Fase medida: começa após o warm-up.
+    test: {
       executor: "ramping-arrival-rate",
+      startTime: "60s",
       startRate: 10,
       timeUnit: "1s",
       preAllocatedVUs: 500,
@@ -15,11 +27,12 @@ export const options = {
         { duration: "5m", target: 1500 },
         { duration: "1m", target: 0 },
       ],
+      tags: { phase: "test" },
     },
   },
   thresholds: {
-    http_req_duration: ["p(50)<200", "p(95)<500", "p(99)<1000"],
-    http_req_failed: ["rate<0.05"],
+    "http_req_duration{phase:test}": ["p(50)<200", "p(95)<500", "p(99)<1000"],
+    "http_req_failed{phase:test}": ["rate<0.05"],
   },
 };
 
