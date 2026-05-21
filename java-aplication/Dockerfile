@@ -17,9 +17,5 @@ USER appuser
 
 COPY --from=build /app/target/*.jar app.jar
 
-# MaxRAMPercentage=50%: em 512MB = ~256MB de heap
-# Deixa ~256MB para Metaspace, code cache, buffers NIO do Tomcat e SO
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=25.0"
-
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
