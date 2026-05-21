@@ -163,7 +163,7 @@ Adicionado `.min_connections(5)` ao `PgPoolOptions` no `main.rs`, igualando o co
 | `stress-test-k6.js` | Cenário `warmup` adicionado; cenário `test` com `startTime: "60s"`; thresholds filtradas por `phase:test` |
 | `rust-aplication/src/main.rs` | `.min_connections(5)` adicionado ao `PgPoolOptions` |
 
-### Resultados Rust
+### Resultados Rust 1
 
 - p(50): 271.62µs
 - p(95): 513.2µs
@@ -173,7 +173,7 @@ Adicionado `.min_connections(5)` ao `PgPoolOptions` no `main.rs`, igualando o co
 - http_req_failed: 0
 - checks_total: 1273310
 
-### Resultados Java
+### Resultados Java 1
 
 - p(50): 346.98µs
 - p(95): 589.23ms
@@ -182,6 +182,26 @@ Adicionado `.min_connections(5)` ao `PgPoolOptions` no `main.rs`, igualando o co
 - dropped_iterations: 3358
 - http_req_failed: 0
 - checks_total: 1267084
+
+### Resultados Rust 2
+
+- p(50): 267.23µs
+- p(95): 512.17µs
+- p(99): 29.88ms
+- vus_max: 627
+- dropped_iterations: 182
+- http_req_failed: 0
+- checks_total: 1273436
+
+### Resultados Java 2
+
+- p(50): 315.81µs
+- p(95): 1.07ms
+- p(99): 99.92ms
+- vus_max: 670
+- dropped_iterations: 192
+- http_req_failed: 0
+- checks_total: 1273416
 
 ---
 
