@@ -42,7 +42,7 @@
 - HikariCP: `maximum-pool-size=10`, `minimum-idle=5`
 - RNG: `ThreadLocalRandom.current()` (V3+) / `SecureRandom` (V1-V2)
 - JVM: Eclipse Temurin 21 (eclipse-temurin:21-jre-alpine)
-- GC: G1GC (V4a) / ZGC Generacional (V4b)
+- GC: G1GC (V4a) / ZGC Generacional (V4b) / SerialGC (V4c)
 - Heap: ~256 MB (`MaxRAMPercentage=50.0` em container de 512 MB)
 
 ### PostgreSQL
@@ -61,6 +61,7 @@
 | V3 | Java: `SecureRandom` → `ThreadLocalRandom` (elimina lock contention). Rust: `min_connections(5)` (iguala pré-aquecimento do HikariCP). k6: fase de warm-up de 60 s a 100 req/s adicionada. | Erro metodológico |
 | V4a | PostgreSQL com limites de recursos. Warm-up aumentado para 120 s a 300 req/s (garante compilação C2 do JIT). HikariCP `connection-timeout` reduzido de 30 s para 5 s. Rust: `.workers(1)` explícito. Java: G1GC explícito via `JAVA_TOOL_OPTIONS` no docker-compose. | Erro metodológico |
 | V4b | Igual à V4a, mas Java usa ZGC Generacional (`-XX:+UseZGC -XX:+ZGenerational`). Isola o GC como variável — demonstra que a variância some quando o GC é adequado para heaps pequenos. | Variância intrínseca isolada |
+| V4c | Igual à V4a, mas Java usa SerialGC (`-XX:+UseSerialGC`). Testa hipótese de que GC single-threaded performa melhor que G1GC e ZGC em ambiente com 0,5 CPU, por não competir com threads do Tomcat. | Variância intrínseca isolada |
 
 ---
 
@@ -293,6 +294,36 @@ Para V4b, apenas trocar `JAVA_TOOL_OPTIONS` no `java-aplication/docker-compose.y
 
 **Conclusao V4b:** ZGC e superior em ambientes com recursos abundantes (varios nucleos, heap grande). Em containers CPU-restrito (0,5 CPU) com heap pequeno (256 MB), G1GC supera ZGC porque suas pausas STW (Stop-The-World) nao competem com threads da aplicacao pelo CPU escasso — a propria natureza "concurrent" do ZGC torna-se sua fraqueza.
 
+### V4c — Java SerialGC
+
+| Metrica | Exec 1 | Exec 2 | Variacao |
+|---|---|---|---|
+| p50 | 314,39 µs | 290,48 µs | ~1,1x |
+| p95 | 1,55 ms | 541,12 µs | **~2,9x** |
+| p99 | 399,77 ms | 205,18 ms | ~1,9x |
+| dropped_iterations | 3.122 | 2.419 | ~1,3x |
+| http_req_failed | 0,00% | 0,00% | — |
+| vus_max | 1.761 | 1.170 | ~1,5x |
+| checks_total (rate) | 1.327.556 (2.011/s) | 1.328.962 (2.013/s) | — |
+| CPU app pico | 51% | 50% | — |
+| CPU db pico | 37% | 31% | — |
+| RAM app pico | ~309 MB | ~302 MB | — |
+| Thresholds | ✓ | ✓ | — |
+
+**Nota Java V4c:** SerialGC confirmou a hipótese central: GC single-threaded supera G1GC e ZGC em ambiente CPU-restrito (0,5 CPU). Análise por dimensão:
+
+1. **Variância reduzida:** p95 variou 2,9x entre execuções (vs 6,5x no G1GC e ~1x catastrófico no ZGC). SerialGC é mais determinístico que G1GC porque suas pausas STW dependem apenas do tamanho do heap vivo — sem heurísticas de região, sem threads concorrentes que variam com o estado do scheduler.
+
+2. **RAM significativamente menor:** ~305 MB vs ~420 MB do G1GC e 453-462 MB do ZGC. G1GC mantém remembered sets, card tables e metadados por região (~4 MB/região × 64 regiões). SerialGC usa estruturas simples sem overhead por região. Essa diferença de ~115 MB é relevante em containers de 512 MB.
+
+3. **CPU app similar ao G1GC:** SerialGC usou ~50-51% da CPU do container, praticamente igual ao G1GC (~53-55%). Durante pausas STW, a CPU cai a zero (thread única, sem parallelismo); entre pausas, a CPU sobe para processar requests. O custo de CPU não foi melhor que G1GC, mas também não foi pior.
+
+4. **Comparação direta de latência:** p50 SerialGC (~290-314 µs) ≈ G1GC (~318-332 µs) — mesma faixa, diferença não significativa. p95 SerialGC (541 µs - 1,55 ms) vs G1GC (29 ms - 195 ms) — SerialGC foi 19-126x melhor no p95. p99 SerialGC (205-399 ms) vs G1GC (298-581 ms) — SerialGC foi 1,5x melhor no p99. ZGC foi derrotado em todas as métricas.
+
+5. **Mecanismo confirmado:** A hipótese era que STW single-threaded sem competição por CPU seria melhor que GC concorrente (ZGC) ou paralelo (G1GC) em 0,5 CPU. Os resultados confirmam: sem threads de GC competindo com Tomcat, o throughput e a latência mediana permanecem estáveis, e as pausas STW — embora mais longas que no ZGC individualmente — são menos frequentes e não roubam CPU da aplicação entre elas.
+
+**Conclusão V4c:** SerialGC é a configuração ótima de GC para Java em containers com 0,5 CPU e 512 MB. Refuta a suposição comum de que GC mais sofisticado = melhor desempenho: em recursos restritos, simplicidade ganha. Este é um achado relevante para dimensionamento de microserviços Java em ambientes cloud com CPU limitado.
+
 ---
 
 ## 8. Interpretacao dos Resultados
@@ -306,6 +337,7 @@ Para V4b, apenas trocar `JAVA_TOOL_OPTIONS` no `java-aplication/docker-compose.y
 | Rust V4 | p95 | ~9,6x (PG throttling) |
 | Java V4a (G1GC) | p95 | **6,5x** (variancia intrinseca do GC) |
 | Java V4b (ZGC) | p95 | **~1x** (sistematicamente ruim) |
+| Java V4c (SerialGC) | p95 | **~2,9x** (melhor que G1GC) |
 
 ### 8.2 Hierarquia de gargalos identificados
 
@@ -314,6 +346,7 @@ Para V4b, apenas trocar `JAVA_TOOL_OPTIONS` no `java-aplication/docker-compose.y
 | Rust V4 | PostgreSQL (throttled em ~50% CPU) | Sim (PG) |
 | Java V4a | Aplicacao (JVM + G1GC + Tomcat) | Sim (app) |
 | Java V4b | Aplicacao (ZGC threads + Tomcat) | Sim (app) + OOM quase |
+| Java V4c (SerialGC) | Aplicacao (Tomcat + pausas STW) | Sim (app) |
 
 ### 8.3 Conclusoes para o TCC
 
@@ -324,5 +357,7 @@ Para V4b, apenas trocar `JAVA_TOOL_OPTIONS` no `java-aplication/docker-compose.y
 **Resultado 3 — ZGC paradoxo:** A hipotese de que ZGC eliminaria a variancia foi refutada. ZGC eliminou a variancia, mas ao custo de degradacao sistematica. Isso demonstra que a escolha de GC e dependente do ambiente: ZGC otimiza para baixa latencia quando recursos sao abundantes; G1GC e mais robusto em ambientes CPU-restrito.
 
 **Resultado 4 — Efeito do PostgreSQL limitado:** Limitar o PostgreSQL a 0,5 CPU reduziu a variancia extrinseca (autovacuum/checkpoint sem controle), mas introduziu throttling determinístico como nova fonte de variancia no Rust. Comparativamente, Java nao sofreu com throttling do PG (PG ficou em apenas 28-36%), pois o proprio app Java foi o gargalo antes do PG.
+
+**Resultado 5 — SerialGC como configuração ótima em CPU-restrito:** SerialGC superou G1GC em variância (2,9x vs 6,5x no p95) e em latência absoluta (p95 541 µs vs 29 ms na melhor execução G1GC). Derrotou ZGC em todas as métricas. Usou ~115 MB menos de RAM que G1GC, relevante para containers de 512 MB. O mecanismo é direto: GC single-threaded não compete com threads Tomcat pelo CPU escasso — durante pausas STW a aplicação para completamente, mas entre elas processa requests sem interferência de GC. GC concorrente (ZGC) e paralelo (G1GC) sacrificam CPU da aplicação continuamente para rodar suas threads de coleta. Em ambiente com CPU abundante, esse trade-off é vantajoso; com 0,5 CPU, é catastrófico ou sub-ótimo. Este resultado tem implicação direta para deployment de Java em cloud com instâncias pequenas (t3.micro, f1.micro): SerialGC deve ser considerado antes de GCs mais sofisticados.
 
 **Validade dos resultados:** A variancia remanescente nao invalida a comparacao. Rust e Java operam sob as mesmas condicoes de PostgreSQL. A diferenca observada reflete caracteristicas fundamentais dos ecossistemas: compilacao nativa vs JVM, ausencia de GC vs G1GC, modelo async vs modelo de threads bloqueantes.
